@@ -73,7 +73,7 @@ func IsMLHCommand(s string) MLHCommand {
 	}
 }
 
-func (c *Client) HandleIssueCommentEvent(ctx context.Context, cfg *FlakeConfig, jobName string, pr *gh.PullRequest, event *gh.IssueCommentEvent) error {
+func (c *Client) HandleIssueCommentEvent(ctx context.Context, jobName string, pr *gh.PullRequest, event *gh.IssueCommentEvent) error {
 	prNumber := event.GetIssue().GetNumber()
 	prURLFails, err := c.GetPRFailure(ctx, pr)
 	if err != nil {
@@ -96,7 +96,7 @@ func (c *Client) HandleIssueCommentEvent(ctx context.Context, cfg *FlakeConfig, 
 		return fmt.Errorf("job %q not found for PR %d: %s", jobName, prNumber, prURLFails)
 	}
 
-	jc, err := jenkins.NewJenkinsClient(ctx, cfg.JenkinsConfig.JenkinsURL, false)
+	jc, err := jenkins.NewJenkinsClient(ctx, c.Config.FlakeTracker.JenkinsConfig.JenkinsURL, false)
 	if err != nil {
 		return err
 	}
@@ -112,7 +112,7 @@ func (c *Client) HandleIssueCommentEvent(ctx context.Context, cfg *FlakeConfig, 
 	var comment string
 
 	// Do not create more GH issues than the ones specified by 'MaxFlakesPerTest'
-	if len(jobFailures) < cfg.MaxFlakesPerTest {
+	if len(jobFailures) < c.Config.FlakeTracker.MaxFlakesPerTest {
 		for _, jobFailure := range jobFailures {
 			// Generate GH Issue comment
 			title, body, err := jenkins.GHIssueDescription(jobFailure)
@@ -121,7 +121,7 @@ func (c *Client) HandleIssueCommentEvent(ctx context.Context, cfg *FlakeConfig, 
 			}
 
 			// Create a GH issue
-			issueNumber, err := c.CreateIssue(ctx, c.orgName, c.repoName, title, body, cfg.IssueTracker.IssueLabels)
+			issueNumber, err := c.CreateIssue(ctx, c.OrgName, c.RepoName, title, body, c.Config.FlakeTracker.IssueTracker.IssueLabels)
 			if err != nil {
 				return fmt.Errorf("unable to create GH issue: %w", err)
 			}
@@ -135,7 +135,7 @@ func (c *Client) HandleIssueCommentEvent(ctx context.Context, cfg *FlakeConfig, 
 	} else {
 		comment = fmt.Sprintf(":-1: Unable to create GH issues: "+
 			"number of flakes (%d) exceeds the maximum permited (%d).",
-			len(jobFailures), cfg.MaxFlakesPerTest)
+			len(jobFailures), c.Config.FlakeTracker.MaxFlakesPerTest)
 	}
 
 	err = c.CreateOrAppendCommentIssueComment(ctx, prNumber, event.GetComment(), comment)

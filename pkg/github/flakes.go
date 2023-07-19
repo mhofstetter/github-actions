@@ -135,7 +135,7 @@ prFailList:
 			}
 
 			// Comment into the GH issue or re-open the GH issue was closed
-			err = c.CommentAndOpenIssue(ctx, c.orgName, c.repoName, ghIssueNumber, body)
+			err = c.CommentAndOpenIssue(ctx, c.OrgName, c.RepoName, ghIssueNumber, body)
 			if err != nil {
 				return "", nil, nil, fmt.Errorf("unable to comment on the GH issue #%d: %w", ghIssueNumber, err)
 			}
@@ -177,7 +177,7 @@ prFailList:
 					}
 
 					// Create a GH issue or re-open it if the issue was closed
-					issueNumber, err := c.CreateIssue(ctx, c.orgName, c.repoName, title, body, flakeCfg.IssueTracker.IssueLabels)
+					issueNumber, err := c.CreateIssue(ctx, c.OrgName, c.RepoName, title, body, flakeCfg.IssueTracker.IssueLabels)
 					if err != nil {
 						return "", nil, nil, fmt.Errorf("unable to create GH issue: %w", err)
 					}

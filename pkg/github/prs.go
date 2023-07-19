@@ -33,7 +33,7 @@ func (c *Client) GetPRsFailures(ctx context.Context, base string) (map[int][]str
 			return nil, ctx.Err()
 		default:
 		}
-		prs, resp, err := c.GHClient.PullRequests.List(ctx, c.orgName, c.repoName, &gh.PullRequestListOptions{
+		prs, resp, err := c.GHClient.PullRequests.List(ctx, c.OrgName, c.RepoName, &gh.PullRequestListOptions{
 			State: "open",
 			Base:  base,
 			ListOptions: gh.ListOptions{
@@ -75,12 +75,12 @@ func (c *Client) GetPRFailure(ctx context.Context, pr *gh.PullRequest) ([]string
 	}
 	prSHA := pr.GetHead().GetSHA()
 
-	return c.GetFailedJenkinsURLs(ctx, c.orgName, c.repoName, prSHA)
+	return c.GetFailedJenkinsURLs(ctx, c.OrgName, c.RepoName, prSHA)
 }
 
 // GetPRFailures gets the jenkins URL failures of the given PR number.
 func (c *Client) GetPRFailures(ctx context.Context, prNumber int) ([]string, error) {
-	pr, _, err := c.GHClient.PullRequests.Get(ctx, c.orgName, c.repoName, prNumber)
+	pr, _, err := c.GHClient.PullRequests.Get(ctx, c.OrgName, c.RepoName, prNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -145,8 +145,8 @@ func (c *Client) editComment(ctx context.Context, orgName, repo string, commentI
 // 'triggerRegexp' is not found then a new comment is created in the PR
 // 'prNumber'.
 func (c *Client) CreateOrAppendComment(ctx context.Context, prNumber int, comment string, triggerRegexp *regexp.Regexp) error {
-	orgName := c.orgName
-	repoName := c.repoName
+	orgName := c.OrgName
+	repoName := c.RepoName
 	prComment, err := c.getPRTriggerComment(ctx, orgName, repoName, prNumber, triggerRegexp)
 	if err != nil {
 		return err
@@ -159,8 +159,8 @@ func (c *Client) CreateOrAppendComment(ctx context.Context, prNumber int, commen
 // If 'issueComment' is nil, it will create a new comment in the PR with the
 // 'prNumber'.
 func (c *Client) CreateOrAppendCommentIssueComment(ctx context.Context, prNumber int, issueComment *gh.IssueComment, comment string) error {
-	orgName := c.orgName
-	repoName := c.repoName
+	orgName := c.OrgName
+	repoName := c.RepoName
 
 	if issueComment == nil {
 		err := c.createComment(ctx, orgName, repoName, prNumber, comment)

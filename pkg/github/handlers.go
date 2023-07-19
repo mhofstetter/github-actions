@@ -27,7 +27,7 @@ import (
 	gh "github.com/google/go-github/v50/github"
 )
 
-func (c *Client) HandlePullRequestEvent(cfg PRBlockerConfig, pre *gh.PullRequestEvent) error {
+func (c *Client) HandlePullRequestEvent(pre *gh.PullRequestEvent) error {
 	pr := pre.GetPullRequest()
 	owner := pr.Base.Repo.GetOwner().GetLogin()
 	repoName := *pr.Base.Repo.Name
@@ -41,9 +41,9 @@ func (c *Client) HandlePullRequestEvent(cfg PRBlockerConfig, pre *gh.PullRequest
 	prLabels := parseGHLabels(pr.Labels)
 
 	// Autolabel PRs as soon they are created
-	if len(cfg.AutoLabel) != 0 { // We only auto-label PRs if when they are open / reopen
+	if len(c.Config.AutoLabel) != 0 { // We only auto-label PRs if when they are open / reopen
 		if action == "opened" || action == "reopened" {
-			err := c.AutoLabel(cfg.AutoLabel, owner, repoName, prNumber, prLabels)
+			err := c.AutoLabel(c.Config.AutoLabel, owner, repoName, prNumber, prLabels)
 			if err != nil {
 				return err
 			}
@@ -51,11 +51,11 @@ func (c *Client) HandlePullRequestEvent(cfg PRBlockerConfig, pre *gh.PullRequest
 	}
 
 	// Check for msgs in commits
-	if len(cfg.RequireMsgsInCommit) != 0 {
+	if len(c.Config.RequireMsgsInCommit) != 0 {
 		if pr.GetState() != "closed" {
 			switch action {
 			case "opened", "reopened", "synchronize":
-				err := c.CommitContains(cfg.RequireMsgsInCommit, owner, repoName, prNumber)
+				err := c.CommitContains(c.Config.RequireMsgsInCommit, owner, repoName, prNumber)
 				if err != nil {
 					return err
 				}
@@ -64,11 +64,11 @@ func (c *Client) HandlePullRequestEvent(cfg PRBlockerConfig, pre *gh.PullRequest
 	}
 
 	// Block PRs if they miss or have particular labels set.
-	if len(cfg.BlockPRWith.LabelsUnset) != 0 || len(cfg.BlockPRWith.LabelsSet) != 0 {
+	if len(c.Config.BlockPRWith.LabelsUnset) != 0 || len(c.Config.BlockPRWith.LabelsSet) != 0 {
 		if pr.GetState() != "closed" {
 			switch action {
 			case "labeled", "unlabeled", "synchronize", "opened", "reopened":
-				blockPR, blockReasons, err := c.BlockPRWith(cfg.BlockPRWith, owner, repoName, prNumber, prLabels)
+				blockPR, blockReasons, err := c.BlockPRWith(c.Config.BlockPRWith, owner, repoName, prNumber, prLabels)
 				if err != nil {
 					return err
 				}
@@ -82,14 +82,14 @@ func (c *Client) HandlePullRequestEvent(cfg PRBlockerConfig, pre *gh.PullRequest
 	}
 
 	// Put PR in projects for release tracking
-	if len(cfg.Project.ColumnName) != 0 && len(cfg.Project.ProjectName) != 0 {
+	if len(c.Config.Project.ColumnName) != 0 && len(c.Config.Project.ProjectName) != 0 {
 		if action == "opened" {
-			err := c.PutPRInProject(owner, repoName, pr.GetID(), cfg.Project)
+			err := c.PutPRInProject(owner, repoName, pr.GetID(), c.Config.Project)
 			if err != nil {
 				// Ignore the error if the project was not found. It might mean
 				// the project was closed so we don't need to track this PR on
 				// it.
-				if !errors.Is(err, &ErrProjectNotFound{projectName: cfg.Project.ProjectName}) {
+				if !errors.Is(err, &ErrProjectNotFound{projectName: c.Config.Project.ProjectName}) {
 					return err
 				}
 			}
@@ -97,10 +97,10 @@ func (c *Client) HandlePullRequestEvent(cfg PRBlockerConfig, pre *gh.PullRequest
 	}
 
 	// Put PR in projects for backport release tracking
-	if len(cfg.MoveToProjectsForLabelsXORed) != 0 {
+	if len(c.Config.MoveToProjectsForLabelsXORed) != 0 {
 		switch action {
 		case "labeled", "unlabeled":
-			err := c.SyncPRProjects(cfg.MoveToProjectsForLabelsXORed, owner, repoName, pr.GetID(), prNumber, prLabels)
+			err := c.SyncPRProjects(c.Config.MoveToProjectsForLabelsXORed, owner, repoName, pr.GetID(), prNumber, prLabels)
 			if err != nil {
 				return err
 			}
@@ -113,24 +113,24 @@ func (c *Client) HandlePullRequestEvent(cfg PRBlockerConfig, pre *gh.PullRequest
 		case "synchronize":
 			// Remove ready-to-merge label if it is present and the developer
 			// synchronized the PR
-			if _, ok := prLabels[cfg.AutoMerge.Label]; ok {
+			if _, ok := prLabels[c.Config.AutoMerge.Label]; ok {
 				_, err := c.GHClient.Issues.RemoveLabelForIssue(
-					context.Background(), owner, repoName, prNumber, cfg.AutoMerge.Label)
+					context.Background(), owner, repoName, prNumber, c.Config.AutoMerge.Label)
 				if err != nil {
 					return err
 				}
-				delete(prLabels, cfg.AutoMerge.Label)
+				delete(prLabels, c.Config.AutoMerge.Label)
 			}
 		}
 		switch action {
 		case "labeled", "unlabeled", "synchronize":
-			cfg.AutoMerge.Label = "ready-to-merge"
-			cfg.AutoMerge.MinimalApprovals = 1
-			if pre.GetLabel().GetName() == cfg.AutoMerge.Label {
+			c.Config.AutoMerge.Label = "ready-to-merge"
+			c.Config.AutoMerge.MinimalApprovals = 1
+			if pre.GetLabel().GetName() == c.Config.AutoMerge.Label {
 				return nil
 			}
 			if !pr.GetDraft() {
-				err := c.AutoMerge(cfg.AutoMerge, owner, repoName, pr.GetBase(), pr.GetHead(), prNumber, prLabels, nil)
+				err := c.AutoMerge(c.Config.AutoMerge, owner, repoName, pr.GetBase(), pr.GetHead(), prNumber, prLabels, nil)
 				if err != nil {
 					return err
 				}
@@ -141,7 +141,7 @@ func (c *Client) HandlePullRequestEvent(cfg PRBlockerConfig, pre *gh.PullRequest
 	return nil
 }
 
-func (c *Client) HandlePullRequestReviewEvent(cfg PRBlockerConfig, pre *gh.PullRequestReviewEvent) error {
+func (c *Client) HandlePullRequestReviewEvent(pre *gh.PullRequestReviewEvent) error {
 	pr := pre.GetPullRequest()
 	owner := pr.Base.Repo.GetOwner().GetLogin()
 	repoName := *pr.Base.Repo.Name
@@ -156,10 +156,10 @@ func (c *Client) HandlePullRequestReviewEvent(cfg PRBlockerConfig, pre *gh.PullR
 
 	// if len(cfg.AutoMerge.Label) != 0 {
 	if true {
-		cfg.AutoMerge.Label = "ready-to-merge"
-		cfg.AutoMerge.MinimalApprovals = 1
+		c.Config.AutoMerge.Label = "ready-to-merge"
+		c.Config.AutoMerge.MinimalApprovals = 1
 		if !pr.GetDraft() {
-			err := c.AutoMerge(cfg.AutoMerge, owner, repoName, pr.GetBase(), pr.GetHead(), prNumber, prLabels, pre.Review)
+			err := c.AutoMerge(c.Config.AutoMerge, owner, repoName, pr.GetBase(), pr.GetHead(), prNumber, prLabels, pre.Review)
 			if err != nil {
 				return err
 			}
@@ -168,14 +168,14 @@ func (c *Client) HandlePullRequestReviewEvent(cfg PRBlockerConfig, pre *gh.PullR
 	return nil
 }
 
-func (c *Client) HandleStatusEvent(cfg PRBlockerConfig, se *gh.StatusEvent) error {
+func (c *Client) HandleStatusEvent(se *gh.StatusEvent) error {
 	owner := se.Repo.GetOwner().GetLogin()
 	repoName := *se.Repo.Name
 	nextPage := 0
 
 	if true {
-		cfg.AutoMerge.Label = "ready-to-merge"
-		cfg.AutoMerge.MinimalApprovals = 1
+		c.Config.AutoMerge.Label = "ready-to-merge"
+		c.Config.AutoMerge.MinimalApprovals = 1
 	}
 
 	var (
@@ -193,7 +193,7 @@ func (c *Client) HandleStatusEvent(cfg PRBlockerConfig, se *gh.StatusEvent) erro
 		}
 	}()
 
-	triage := cfg.FlakeTracker != nil && jenkins.IsJenkinsFailure(se.GetState(), se.GetDescription())
+	triage := c.Config.FlakeTracker != nil && jenkins.IsJenkinsFailure(se.GetState(), se.GetDescription())
 
 	if triage {
 		c.Log().Info().Msg("Triaging flake")
@@ -201,7 +201,7 @@ func (c *Client) HandleStatusEvent(cfg PRBlockerConfig, se *gh.StatusEvent) erro
 		// Check for potential flakes
 		urlFails = []string{se.GetTargetURL()}
 
-		triggerRegexp, err = regexp.Compile(cfg.FlakeTracker.JenkinsConfig.RegexTrigger)
+		triggerRegexp, err = regexp.Compile(c.Config.FlakeTracker.JenkinsConfig.RegexTrigger)
 		if err != nil {
 			return err
 		}
@@ -209,12 +209,12 @@ func (c *Client) HandleStatusEvent(cfg PRBlockerConfig, se *gh.StatusEvent) erro
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		cancels = append(cancels, cancel)
 
-		issueKnownFlakes, err = c.GetFlakeIssues(ctx, owner, repoName, IssueCreator, cfg.FlakeTracker.IssueTracker.IssueLabels)
+		issueKnownFlakes, err = c.GetFlakeIssues(ctx, owner, repoName, IssueCreator, c.Config.FlakeTracker.IssueTracker.IssueLabels)
 		if err != nil {
 			return err
 		}
 
-		jc, err = jenkins.NewJenkinsClient(ctx, cfg.FlakeTracker.JenkinsConfig.JenkinsURL, false)
+		jc, err = jenkins.NewJenkinsClient(ctx, c.Config.FlakeTracker.JenkinsConfig.JenkinsURL, false)
 		if err != nil {
 			return err
 		}
@@ -236,7 +236,7 @@ func (c *Client) HandleStatusEvent(cfg PRBlockerConfig, se *gh.StatusEvent) erro
 			if err != nil {
 				return fmt.Errorf("failed to extract org & repo name from PR URL: %w", err)
 			}
-			if prOrgName != c.orgName || prRepoName != c.repoName {
+			if prOrgName != c.OrgName || prRepoName != c.RepoName {
 				continue
 			}
 			pr, _, err := c.GHClient.PullRequests.Get(ctx, prOrgName, prRepoName, pr.GetNumber())
@@ -251,7 +251,7 @@ func (c *Client) HandleStatusEvent(cfg PRBlockerConfig, se *gh.StatusEvent) erro
 
 			prLabels := parseGHLabels(pr.Labels)
 
-			err = c.AutoMerge(cfg.AutoMerge, owner, repoName, pr.GetBase(), pr.GetHead(), pr.GetNumber(), prLabels, nil)
+			err = c.AutoMerge(c.Config.AutoMerge, owner, repoName, pr.GetBase(), pr.GetHead(), pr.GetNumber(), prLabels, nil)
 			if err != nil {
 				return err
 			}
@@ -262,7 +262,7 @@ func (c *Client) HandleStatusEvent(cfg PRBlockerConfig, se *gh.StatusEvent) erro
 					"pr":          pr.GetNumber(),
 					"base-branch": baseBranch,
 				}).Msg("Triaging flake")
-				err = c.TriagePRFailures(ctx, jc, cfg.FlakeTracker, pr.GetNumber(), urlFails, issueKnownFlakes, jobNameToJenkinsFails, triggerRegexp)
+				err = c.TriagePRFailures(ctx, jc, c.Config.FlakeTracker, pr.GetNumber(), urlFails, issueKnownFlakes, jobNameToJenkinsFails, triggerRegexp)
 				if err != nil {
 					return err
 				}
@@ -278,16 +278,16 @@ func (c *Client) HandleStatusEvent(cfg PRBlockerConfig, se *gh.StatusEvent) erro
 	return nil
 }
 
-func (c *Client) HandleCheckRunEvent(cfg PRBlockerConfig, e *gh.CheckRunEvent) error {
-	cfg.AutoMerge.Label = "ready-to-merge"
-	cfg.AutoMerge.MinimalApprovals = 1
+func (c *Client) HandleCheckRunEvent(e *gh.CheckRunEvent) error {
+	c.Config.AutoMerge.Label = "ready-to-merge"
+	c.Config.AutoMerge.MinimalApprovals = 1
 
 	for _, pr := range e.GetCheckRun().PullRequests {
 		prOrgName, prRepoName, err := ownerRepoFromRepositoryURL(pr.GetBase().GetRepo().GetURL())
 		if err != nil {
 			return fmt.Errorf("failed to extract org & repo name from PR URL: %w", err)
 		}
-		if prOrgName != c.orgName || prRepoName != c.repoName {
+		if prOrgName != c.OrgName || prRepoName != c.RepoName {
 			c.Log().Info().Fields(map[string]interface{}{"pr-number": pr.GetNumber()}).Msgf("PR belongs to a fork")
 			continue
 		}
@@ -299,7 +299,7 @@ func (c *Client) HandleCheckRunEvent(cfg PRBlockerConfig, e *gh.CheckRunEvent) e
 
 		prLabels := parseGHLabels(pr.Labels)
 
-		if err := c.AutoMerge(cfg.AutoMerge, prOrgName, prRepoName, pr.GetBase(), pr.GetHead(), pr.GetNumber(), prLabels, nil); err != nil {
+		if err := c.AutoMerge(c.Config.AutoMerge, prOrgName, prRepoName, pr.GetBase(), pr.GetHead(), pr.GetNumber(), prLabels, nil); err != nil {
 			return fmt.Errorf("failed to automerge: %w", err)
 		}
 	}
@@ -307,16 +307,16 @@ func (c *Client) HandleCheckRunEvent(cfg PRBlockerConfig, e *gh.CheckRunEvent) e
 	return nil
 }
 
-func (c *Client) HandleCheckSuiteEvent(cfg PRBlockerConfig, e *gh.CheckSuiteEvent) error {
-	cfg.AutoMerge.Label = "ready-to-merge"
-	cfg.AutoMerge.MinimalApprovals = 1
+func (c *Client) HandleCheckSuiteEvent(e *gh.CheckSuiteEvent) error {
+	c.Config.AutoMerge.Label = "ready-to-merge"
+	c.Config.AutoMerge.MinimalApprovals = 1
 
 	for _, pr := range e.GetCheckSuite().PullRequests {
 		prOrgName, prRepoName, err := ownerRepoFromRepositoryURL(pr.GetBase().GetRepo().GetURL())
 		if err != nil {
 			return fmt.Errorf("failed to extract org & repo name from PR URL: %w", err)
 		}
-		if prOrgName != c.orgName || prRepoName != c.repoName {
+		if prOrgName != c.OrgName || prRepoName != c.RepoName {
 			c.Log().Info().Fields(map[string]interface{}{"pr-number": pr.GetNumber()}).Msgf("PR belongs to a fork")
 			continue
 		}
@@ -328,7 +328,7 @@ func (c *Client) HandleCheckSuiteEvent(cfg PRBlockerConfig, e *gh.CheckSuiteEven
 
 		prLabels := parseGHLabels(pr.Labels)
 
-		if err := c.AutoMerge(cfg.AutoMerge, prOrgName, prRepoName, pr.GetBase(), pr.GetHead(), pr.GetNumber(), prLabels, nil); err != nil {
+		if err := c.AutoMerge(c.Config.AutoMerge, prOrgName, prRepoName, pr.GetBase(), pr.GetHead(), pr.GetNumber(), prLabels, nil); err != nil {
 			return fmt.Errorf("failed to automerge: %w", err)
 		}
 	}

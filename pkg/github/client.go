@@ -23,14 +23,16 @@ import (
 	gh "github.com/google/go-github/v50/github"
 	"github.com/rs/zerolog"
 	"golang.org/x/oauth2"
+	"gopkg.in/yaml.v3"
 )
 
 type Client struct {
 	GHClient   *gh.Client
 	log        *zerolog.Logger
-	orgName    string
-	repoName   string
+	OrgName    string
+	RepoName   string
 	clientMode bool
+	Config     PRBlockerConfig
 }
 
 func NewClient(ghToken string, orgName, repo string, logger *zerolog.Logger) *Client {
@@ -45,8 +47,8 @@ func NewClient(ghToken string, orgName, repo string, logger *zerolog.Logger) *Cl
 				),
 			),
 		),
-		orgName:    orgName,
-		repoName:   repo,
+		OrgName:    orgName,
+		RepoName:   repo,
 		clientMode: true,
 		log:        logger,
 	}
@@ -56,8 +58,8 @@ func NewClientFromGHClient(ghClient *gh.Client, orgName, repo string, logger *ze
 	return &Client{
 		GHClient: ghClient,
 		log:      logger,
-		orgName:  orgName,
-		repoName: repo,
+		OrgName:  orgName,
+		RepoName: repo,
 	}
 }
 
@@ -127,6 +129,7 @@ func (c *Client) GetFailedJenkinsURLs(parentCtx context.Context, owner, repoName
 	// 		ListOptions: gh.ListOptions{
 	// 			Page: nextPage,
 	// 		},
+
 	// 	})
 	// 	if err != nil {
 	// 		return nil, err
@@ -148,4 +151,24 @@ func (c *Client) GetFailedJenkinsURLs(parentCtx context.Context, owner, repoName
 
 func (c *Client) Log() *zerolog.Logger {
 	return c.log
+}
+
+func (c *Client) ReadConfig(sha string) error {
+	actionCfgPath, cfgFile, err := GetActionsCfg(c, c.OrgName, c.RepoName, sha)
+	if err != nil {
+		return err
+	}
+	if actionCfgPath == "" {
+		return fmt.Errorf("unable to find config files in sha %s", sha)
+	}
+
+	var cfg PRBlockerConfig
+	err = yaml.Unmarshal(cfgFile, &cfg)
+	if err != nil {
+		return fmt.Errorf("unable to unmarshal config %q file: %s\n", actionCfgPath, err)
+	}
+
+	c.Config = cfg
+
+	return nil
 }

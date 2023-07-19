@@ -164,7 +164,7 @@ func (c *Client) findDupIssue(ctx context.Context, owner string, repo string, gh
 			// If multiple people add "Duplicate of #" we will
 			// consider the last comment that considers it as a
 			// duplicate.
-			dupNumber := getDuplicate(c.orgName, c.repoName, ghIssue.GetBody())
+			dupNumber := getDuplicate(c.OrgName, c.RepoName, ghIssue.GetBody())
 			if dupNumber != 0 {
 				dupIssueNumber = dupNumber
 			}
