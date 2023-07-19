@@ -43,6 +43,8 @@ func (h *PRCommentHandler) Handle(ctx context.Context, eventType, deliveryID str
 		err = h.HandleStatusEvent(ctx, payload)
 	case "check_run":
 		err = h.HandleCheckRunEvent(ctx, payload)
+	case "check_suite":
+		err = h.HandleCheckSuiteEvent(ctx, payload)
 	case "pull_request_review":
 		err = h.HandlePullRequestReviewEvent(ctx, payload)
 	case "pull_request":
@@ -270,4 +272,43 @@ func (h *PRCommentHandler) HandleCheckRunEvent(ctx context.Context, payload []by
 	}
 
 	return ghClient.HandleCheckRunEvent(c, &event)
+}
+
+func (h *PRCommentHandler) HandleCheckSuiteEvent(ctx context.Context, payload []byte) error {
+	var event gh.CheckSuiteEvent
+	if err := json.Unmarshal(payload, &event); err != nil {
+		return errors.Wrap(err, "failed to parse check suite event payload")
+	}
+
+	if event.GetAction() != "completed" {
+		return nil
+	}
+
+	installationID := event.GetInstallation().GetID()
+
+	installClient, err := h.NewInstallationClient(installationID)
+	if err != nil {
+		return err
+	}
+
+	owner := event.Repo.GetOwner().GetLogin()
+	repoName := event.Repo.GetName()
+	ghClient := github.NewClientFromGHClient(installClient, owner, repoName, zerolog.Ctx(ctx))
+	ghSha := event.GetCheckSuite().GetHeadSHA()
+
+	actionCfgPath, cfgFile, err := github.GetActionsCfg(ghClient, owner, repoName, ghSha)
+	if err != nil {
+		return err
+	}
+	if actionCfgPath == "" {
+		return fmt.Errorf("unable to find config files in sha %s", ghSha)
+	}
+
+	var c github.PRBlockerConfig
+	err = yaml.Unmarshal(cfgFile, &c)
+	if err != nil {
+		return fmt.Errorf("unable to unmarshal config %q file: %s\n", actionCfgPath, err)
+	}
+
+	return ghClient.HandleCheckSuiteEvent(c, &event)
 }

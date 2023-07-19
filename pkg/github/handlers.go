@@ -307,6 +307,35 @@ func (c *Client) HandleCheckRunEvent(cfg PRBlockerConfig, e *gh.CheckRunEvent) e
 	return nil
 }
 
+func (c *Client) HandleCheckSuiteEvent(cfg PRBlockerConfig, e *gh.CheckSuiteEvent) error {
+	cfg.AutoMerge.Label = "ready-to-merge"
+	cfg.AutoMerge.MinimalApprovals = 1
+
+	for _, pr := range e.GetCheckSuite().PullRequests {
+		prOrgName, prRepoName, err := ownerRepoFromRepositoryURL(pr.GetBase().GetRepo().GetURL())
+		if err != nil {
+			return fmt.Errorf("failed to extract org & repo name from PR URL: %w", err)
+		}
+		if prOrgName != c.orgName || prRepoName != c.repoName {
+			c.Log().Info().Fields(map[string]interface{}{"pr-number": pr.GetNumber()}).Msgf("PR belongs to a fork")
+			continue
+		}
+
+		if pr.GetDraft() {
+			c.Log().Info().Fields(map[string]interface{}{"pr-number": pr.GetNumber()}).Msgf("PR is in draft")
+			continue
+		}
+
+		prLabels := parseGHLabels(pr.Labels)
+
+		if err := c.AutoMerge(cfg.AutoMerge, prOrgName, prRepoName, pr.GetBase(), pr.GetHead(), pr.GetNumber(), prLabels, nil); err != nil {
+			return fmt.Errorf("failed to automerge: %w", err)
+		}
+	}
+
+	return nil
+}
+
 // IsNotFound returns true if the given error is a NotFound.
 func IsNotFound(err error) bool {
 	return IsHTTPErrorCode(err, http.StatusNotFound)
